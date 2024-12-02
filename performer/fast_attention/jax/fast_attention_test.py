@@ -30,7 +30,7 @@ from jax import random
 import jax.numpy as jnp
 import numpy as onp
 
-from performer.fast_attention.jax import fast_attention
+import fast_attention
 
 
 def dot_product_attention(query,
