@@ -166,49 +166,33 @@ def sincos_softmax_kernel_feature_creator(data,
   return data_prime
 
 
-class sara_rt_trainable_kernal_feature_creator(Module): 
-  feature_dim: int
-  input_dim: int
-  kernel_epsilon: float = 1e-3
-  kernal_fn: callable = jax.nn.relu
-  normalize_data: bool = False
+# pass v through here, calculate v hadamard relu(data)
+def generalized_kernel_feature_creator(data, projection_matrix, batch_dims_t,
+                                       precision, kernel_fn, kernel_epsilon,
+                                       normalize_data, sara_vector):
+  """Constructs kernel features for fast generalized attention.
 
-    
-  @compact
-  def __call__(self, data, batch_dims_t,precision):
 
-    #trainable matrix G
-    
-    self.projection_matrix = self.param(
-      'projection_matrix', 
-      jax.nn.initializers.glorot_uniform(), 
-      (self.input_dim, self.feature_dim)
-    )
-    #trainable v for hadamard
-    self.v = self.param(
-      'v', 
-      jax.nn.initializers.glorot_uniform(), 
-      (self.feature_dim)
-    )
+  Args:
+    data: input for which features are computes
+    projection_matrix: matrix used to compute features
+    batch_dims_t: tuple of batch dimensions
+    precision: precision parameter
+    kernel_fn: kernel function used
+    kernel_epsilon: additive positive term added to every feature for numerical
+      stability
+    normalize_data: predicate indicating whether data should be normalized.
 
-    if self.normalize_data: 
-      data_normalizer = 1.0 / (jnp.sqrt(jnp.sqrt(data.shape[-1])))
-    else: 
-      data_normalizer = 1.0
-    data_mod_shape = data.shape[0:len(batch_dims_t)] + (self.input_dim, self.feature_dim)
-    data_thick_random_matrix = jnp.broadcast_to(self.projection_matrix, data_mod_shape)
-    
-    data_dash = lax.dot_general(
-        data_normalizer * data,
-        data_thick_random_matrix,
-        (((data.ndim - 1,), (data_thick_random_matrix.ndim - 1,)),
-         (batch_dims_t, batch_dims_t)),
-        precision=precision)
-
-    data_prime = jnp.multiply(self.v, data_dash) +self.kernel_epsilon
-
-    return data_prime
-
+  Returns:
+    Random features for fast generalized attention.
+  """
+  if normalize_data:
+    data_normalizer = 1.0 / (jnp.sqrt(jnp.sqrt(data.shape[-1])))
+  else:
+    data_normalizer = 1.0
+  if sara_vector == None: 
+    sara_vector = jnp.ones(data.shape[-1])
+  return jnp.multiply(sara_vector,kernel_fn(data_normalizer * data)) + kernel_epsilon
 
 @gin.configurable
 def make_fast_softmax_attention(qkv_dim,
@@ -271,7 +255,7 @@ def make_fast_softmax_attention(qkv_dim,
       lax_scan_unroll=lax_scan_unroll).dot_product_attention
   return attention_fn
 
-
+# no change should be needed here: just this wrapper is likely fine
 @gin.configurable
 def make_fast_generalized_attention(qkv_dim,
                                     renormalize_attention=True,
@@ -279,6 +263,7 @@ def make_fast_generalized_attention(qkv_dim,
                                     nb_features=256,
                                     features_type='deterministic',
                                     kernel_fn=jax.nn.relu,
+                                    sara_vector = None,
                                     kernel_epsilon=0.001,
                                     redraw_features=False,
                                     unidirectional=False,
@@ -297,32 +282,28 @@ def make_fast_generalized_attention(qkv_dim,
   else:
     raise ValueError('Unknown feature value type')
 
-  kernel_feature_creator= sara_rt_trainable_kernal_feature_creator(
-    feature_dim = qkv_dim, 
-    input_dim = qkv_dim,
-    kernel_epsilon = kernel_epsilon
-  )
-
-
-  def feature_creator(data,
-                      projection_matrix,
-                      attention_dims_t,
-                      batch_dims_t,
-                      precision,
-                      is_query,
-                      normalize_data=True):
-    del projection_matrix
+  def kernel_feature_creator(data,
+                            projection_matrix,
+                            attention_dims_t,
+                            batch_dims_t,
+                            precision,
+                            is_query,
+                            normalize_data=False):
     del attention_dims_t
     del is_query
-    return kernel_feature_creator(data,batch_dims_t, precision)
+    return generalized_kernel_feature_creator(data, projection_matrix,
+                                              batch_dims_t, precision,
+                                              kernel_fn, kernel_epsilon,
+                                              normalize_data, sara_vector)
 
   attention_fn = FastAttentionviaLowRankDecomposition(
       matrix_creator,
-      kernel_feature_creator = feature_creator,
+      kernel_feature_creator,
       renormalize_attention=renormalize_attention,
       numerical_stabilizer=numerical_stabilizer,
       redraw_features=redraw_features,
       unidirectional=unidirectional,
+      sara_vector = sara_vector,
       lax_scan_unroll=lax_scan_unroll).dot_product_attention
   return attention_fn
 
@@ -552,7 +533,8 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
                numerical_stabilizer,
                redraw_features,
                unidirectional,
-               lax_scan_unroll=1):  # For optimal GPU performance, set to 16.
+               lax_scan_unroll=1, 
+               sara_vector=None):  # For optimal GPU performance, set to 16.
     rng = random.PRNGKey(0)
     self.matrix_creator = matrix_creator
     self.projection_matrix = self.draw_weights(rng)
@@ -562,6 +544,7 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
     self.redraw_features = redraw_features
     self.unidirectional = unidirectional
     self.lax_scan_unroll = lax_scan_unroll
+    self.sara_vector = sara_vector
 
   def draw_weights(self, key):
     if self.matrix_creator is None:
@@ -582,6 +565,8 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
                             dropout_rng=None,
                             dropout_rate=0.,
                             deterministic=False,
+                            sarart=True, #add flag for sarart usage
+                            sara_vector=None, #v for sarart
                             precision=None):
 
     assert key.shape[:-1] == value.shape[:-1]
@@ -624,12 +609,17 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
               len(batch_dims) + len(axis)))
 
     # Constructing tensors Q^{'} and K^{'}.
+    # need to pass in v as an extra argument for sara
+    #if sarart == True: also logic for none saravector: just initialize as all ones
+
     query_prime = self.kernel_feature_creator(query, self.projection_matrix,
                                               attention_dims_t, batch_dims_t,
                                               precision, True)
     key_prime = self.kernel_feature_creator(key, self.projection_matrix,
                                             attention_dims_t, batch_dims_t,
                                             precision, False)
+    
+
 
     if self.unidirectional:
       index = attention_dims_t[0]

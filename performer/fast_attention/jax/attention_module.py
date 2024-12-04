@@ -28,12 +28,15 @@ from flax.linen.linear import DenseGeneral
 from flax.linen.module import compact
 from flax.linen.module import Module
 import jax.numpy as jnp
+import jax
 
 PRNGKey = Any
 Shape = Tuple[int]
 Dtype = Any
 Array = Any
 
+
+#dot product attention for SARART. 
 
 class MultiHeadDotProductFastAttention(Module):
   """Multi-head dot-product fast attention.
@@ -130,6 +133,13 @@ class MultiHeadDotProductFastAttention(Module):
     if not self.deterministic and self.dropout_rate > 0.:
       dropout_rng = self.make_rng('dropout')
 
+    #initialize a vector $v$ for sara-rt attention
+    v = self.param(
+      'v', 
+      jax.nn.initializers.glorot_uniform(), 
+      (head_dim)
+    )
+
     # Apply Attention
     x = self.attention_fn(
         query,
@@ -141,7 +151,9 @@ class MultiHeadDotProductFastAttention(Module):
         broadcast_dropout=self.broadcast_dropout,
         deterministic=self.deterministic,
         dtype=self.dtype,
-        precision=self.precision)
+        precision=self.precision
+        sarart=True,
+        sara_vector = v)
 
     # Back to the original inputs' dimensions.
     out = DenseGeneral(features=features,
