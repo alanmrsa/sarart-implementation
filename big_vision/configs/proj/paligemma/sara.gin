@@ -1,0 +1,2 @@
+Encoder1DBlock.attention_fn = @make_fast_generalized_attention()
+MAPHead.attention_fn = @make_fast_generalized_attention()

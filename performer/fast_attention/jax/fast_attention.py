@@ -192,6 +192,7 @@ def generalized_kernel_feature_creator(data, projection_matrix, batch_dims_t,
     data_normalizer = 1.0
   if sara_vector == None: 
     sara_vector = jnp.ones(data.shape[-1])
+  print(sara_vector)
   return jnp.multiply(sara_vector,kernel_fn(data_normalizer * data)) + kernel_epsilon
 
 @gin.configurable

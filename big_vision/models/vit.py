@@ -18,10 +18,11 @@ However, the names of modules are made to match the old ones for easy loading.
 """
 
 from typing import Optional, Sequence, Union
-
+from typing import (Any, Callable, Tuple, Optional)
 from absl import logging
 from big_vision import utils
 from big_vision.models import common
+from flax.linen.attention import dot_product_attention
 import flax
 import flax.linen as nn
 import flax.training.checkpoints
@@ -29,7 +30,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.ndimage
-
+import gin
 
 def posemb_sincos_2d(h, w, width, temperature=10_000., dtype=jnp.float32):
   """Follows the MoCo v3 logic."""
@@ -77,13 +78,14 @@ class MlpBlock(nn.Module):
     x = nn.Dense(d, dtype=self.dtype_mm, **inits)(x)
     return x
 
-
+@gin.configurable
 class Encoder1DBlock(nn.Module):
   """Single transformer encoder block (MHSA + MLP)."""
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
   dropout: float = 0.0
   dtype_mm: str = "float32"
+  attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
 
   @nn.compact
   def __call__(self, x, deterministic=True):
@@ -95,6 +97,7 @@ class Encoder1DBlock(nn.Module):
         kernel_init=nn.initializers.xavier_uniform(),
         deterministic=deterministic,
         dtype=self.dtype_mm,
+        attention_fn=dot_product_attention
     )(y, y)
     y = nn.with_logical_constraint(y, ("act_batch", "act_len", "act_emb"))
     y = nn.Dropout(rate=self.dropout)(y, deterministic)
@@ -111,7 +114,7 @@ class Encoder1DBlock(nn.Module):
     x = nn.with_logical_constraint(x, ("act_batch", "act_len", "act_emb"))
     return x, out
 
-
+@gin.configurable
 class Encoder(nn.Module):
   """Transformer Model Encoder for sequence to sequence translation."""
   depth: int
@@ -159,7 +162,7 @@ class Encoder(nn.Module):
 
     return nn.LayerNorm(name="encoder_norm")(x), out
 
-
+@gin.configurable
 class MAPHead(nn.Module):
   """Multihead Attention Pooling."""
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
@@ -175,14 +178,16 @@ class MAPHead(nn.Module):
 
     x = nn.MultiHeadDotProductAttention(
         num_heads=self.num_heads,
-        kernel_init=nn.initializers.xavier_uniform())(probe, x)
+        kernel_init=nn.initializers.xavier_uniform(), 
+        attention_fn=dot_product_attention
+        )(probe, x)
 
     # TODO: dropout on head?
     y = nn.LayerNorm()(x)
     x = x + MlpBlock(mlp_dim=self.mlp_dim)(y)
     return x[:, 0]
 
-
+@gin.configurable
 class _Model(nn.Module):
   """ViT model."""
 
