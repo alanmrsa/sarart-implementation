@@ -32,6 +32,8 @@ import numpy as np
 import scipy.ndimage
 import gin
 
+Array = Any
+
 def posemb_sincos_2d(h, w, width, temperature=10_000., dtype=jnp.float32):
   """Follows the MoCo v3 logic."""
   y, x = jnp.mgrid[:h, :w]
@@ -97,7 +99,7 @@ class Encoder1DBlock(nn.Module):
         kernel_init=nn.initializers.xavier_uniform(),
         deterministic=deterministic,
         dtype=self.dtype_mm,
-        attention_fn=dot_product_attention
+        attention_fn=self.attention_fn
     )(y, y)
     y = nn.with_logical_constraint(y, ("act_batch", "act_len", "act_emb"))
     y = nn.Dropout(rate=self.dropout)(y, deterministic)
@@ -167,6 +169,7 @@ class MAPHead(nn.Module):
   """Multihead Attention Pooling."""
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
+  attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
 
   @nn.compact
   def __call__(self, x):
@@ -179,7 +182,7 @@ class MAPHead(nn.Module):
     x = nn.MultiHeadDotProductAttention(
         num_heads=self.num_heads,
         kernel_init=nn.initializers.xavier_uniform(), 
-        attention_fn=dot_product_attention
+        attention_fn=self.attention_fn
         )(probe, x)
 
     # TODO: dropout on head?

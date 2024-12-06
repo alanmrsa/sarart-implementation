@@ -1,2 +1,5 @@
+import performer.fast_attention.jax.fast_attention 
+import big_vision.models.vit
+
 Encoder1DBlock.attention_fn = @make_fast_generalized_attention()
 MAPHead.attention_fn = @make_fast_generalized_attention()

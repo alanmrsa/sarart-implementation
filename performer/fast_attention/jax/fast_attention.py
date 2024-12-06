@@ -196,7 +196,7 @@ def generalized_kernel_feature_creator(data, projection_matrix, batch_dims_t,
   return jnp.multiply(sara_vector,kernel_fn(data_normalizer * data)) + kernel_epsilon
 
 @gin.configurable
-def make_fast_softmax_attention(qkv_dim,
+def make_fast_softmax_attention(qkv_dim=None,
                                 renormalize_attention=True,
                                 numerical_stabilizer=0.000001,
                                 nb_features=256,
@@ -258,7 +258,7 @@ def make_fast_softmax_attention(qkv_dim,
 
 # no change should be needed here: just this wrapper is likely fine
 @gin.configurable
-def make_fast_generalized_attention(qkv_dim,
+def make_fast_generalized_attention(qkv_dim=None,
                                     renormalize_attention=True,
                                     numerical_stabilizer=0.0,
                                     nb_features=256,
@@ -611,7 +611,7 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
 
     # Constructing tensors Q^{'} and K^{'}.
     # need to pass in v as an extra argument for sara
-    #if sarart == True: also logic for none saravector: just initialize as all ones
+    #if sarart == True, sara_vector is not None, pass with SaraVector. add in for G, m, etc.
 
     query_prime = self.kernel_feature_creator(query, self.projection_matrix,
                                               attention_dims_t, batch_dims_t,
