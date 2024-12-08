@@ -1,5 +1,8 @@
 import performer.fast_attention.jax.fast_attention 
 import big_vision.models.vit
+import jax
 
 Encoder1DBlock.attention_fn = @make_fast_generalized_attention()
 MAPHead.attention_fn = @make_fast_generalized_attention()
+make_fast_generalized_attention.kernal_fn = @jax.nn.relu()
+# change out for different nonlinearityjax.nn.swish(), jax.nn.gelu()
