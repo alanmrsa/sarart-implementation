@@ -19,6 +19,7 @@ However, the names of modules are made to match the old ones for easy loading.
 
 from typing import Optional, Sequence, Union
 from typing import (Any, Callable, Tuple, Optional)
+from performer.fast_attention.jax.fast_attention import make_fast_generalized_attention
 from absl import logging
 from big_vision import utils
 from big_vision.models import common
@@ -87,10 +88,11 @@ class Encoder1DBlock(nn.Module):
   num_heads: int = 12
   dropout: float = 0.0
   dtype_mm: str = "float32"
-  attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
+  attention_fn: Callable[[Array, Array, Array], Array] = make_fast_generalized_attention()
 
   @nn.compact
   def __call__(self, x, deterministic=True):
+    jax.debug.print(self.attention_fn.__name__)
     out = {}
     x = nn.with_logical_constraint(x, ("act_batch", "act_len", "act_emb"))
     y = nn.LayerNorm()(x)
@@ -169,11 +171,12 @@ class MAPHead(nn.Module):
   """Multihead Attention Pooling."""
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
-  attention_fn: Callable[[Array, Array, Array], Array] = dot_product_attention
+  attention_fn: Callable[[Array, Array, Array], Array] = make_fast_generalized_attention()
 
   @nn.compact
   def __call__(self, x):
     # TODO
+    jax.debug.print(self.attention_fn.__name__)
     n, l, d = x.shape  # pylint: disable=unused-variable
     probe = self.param("probe", nn.initializers.xavier_uniform(),
                        (1, 1, d), x.dtype)
